@@ -1,0 +1,224 @@
+Sub KMeansCluster_RandomizedElements(Elements, xAxisLen, yAxisLen, Clusters, EnableLog, StoragePath)
+/*Arguments Explained:
+
+Elements = That's the number of random elements that we will plot on the scatterPlot
+xAxisLen = Maximum random value on the x axis
+yAxisLen = Maximum random value on the y axis
+Clusters = That's the K - number of cluster groups where the elements will be assigned
+EnableLog = 1 to enable Log; 0 to disable log
+StoragePath = dedicated folder to store all the temp files to avoid bandwidth issues with the RAM during exectuion
+*/
+
+SET vClustersStorePath = '$(StoragePath)';
+
+//Create randomized set of items to be clustered
+	GenerateData:
+	NoConcatenate
+	LOAD
+		Rand()*$(xAxisLen) 	as MeasureA
+	,	Rand()*$(yAxisLen) 	as MeasureB
+	,	RowNo() 	as Dimension
+	,	'Attribute'	as Flag
+	,	0			as State
+	AutoGenerate $(Elements)
+	;
+
+//Determine dataset extremums as variables
+	CentroidsExtremes:
+	NoConcatenate
+	LOAD
+		Max(MeasureA)-Min(MeasureA) as DeltaA
+	,	(Max(MeasureA)-Min(MeasureA))/$(Clusters) as DeltaDistanceA
+	,	Max(MeasureB)-Min(MeasureB) as DeltaB
+	,	(Max(MeasureB)-Min(MeasureB))/$(Clusters) as DeltaDistanceB
+	,	Min(MeasureA) as MinMeasureA
+	,	Min(MeasureB) as MinMeasureB
+	RESIDENT GenerateData
+	;
+
+LET vDeltaDistanceA = peek('DeltaDistanceA',-1,'CentroidsExtremes');
+LET vDeltaDistanceB = peek('DeltaDistanceB',-1,'CentroidsExtremes');
+LET vMinDistanceA = peek('MinMeasureA',-1,'CentroidsExtremes');
+LET vMinDistanceB = peek('MinMeasureB',-1,'CentroidsExtremes');
+
+DROP TABLE CentroidsExtremes;
+
+//Generate initial semi-random cluster centeroids
+	Centeroids:
+	NoConcatenate
+	LOAD * INLINE [
+	MeasureA,MeasureB,Dimension,Flag,State,ClusterID
+	];
+
+For vCentroids=1 to $(Clusters)
+
+	LET vCentroid_$(vCentroids)_X = $(vCentroids)*$(vDeltaDistanceA)+$(vMinDistanceA);
+	LET vCentroid_$(vCentroids)_Y = $(vCentroids)*$(vDeltaDistanceB)+$(vMinDistanceB);
+	
+	Concatenate(Centeroids)
+	LOAD
+		$(vCentroids)*$(vDeltaDistanceA)+$(vMinDistanceA) 	as MeasureA
+	,	$(vCentroids)*$(vDeltaDistanceB)+$(vMinDistanceB) 	as MeasureB
+	,	RowNo() 											as Dimension
+	,	'Center' 											as Flag
+	,	0													as State
+	,	'$(vCentroids)'										as ClusterID
+	AutoGenerate 1
+	;
+
+Next vCentroids;
+
+
+	Concatenate(GenerateData)
+	LOAD
+	MeasureA,MeasureB,Dimension,Flag,State,ClusterID
+	Resident Centeroids
+	;
+
+STORE GenerateData INTO $(vClustersStorePath)\ClusterState0.qvd (qvd);
+DROP TABLE GenerateData;
+//Here we've generated the initial state of the clusters where we are starting the itteration
+
+DROP TABLE Centeroids;
+
+//Check Euclidian Distance between individual elements and centroids
+
+LET i1=1;
+LET vValidateEndOfLoop = 0;
+
+//We start itterating the centroid coordinates until no change between the last and the previous state has occurred.
+DO UNTIL vValidateEndOfLoop = 1
+
+	LET vPreviousState=$(i1)-1;
+
+	PointData:
+	NoConcatenate
+	LOAD
+		MeasureA
+	,	MeasureB
+	,	Dimension
+	,	Flag
+	,	State
+	FROM $(vClustersStorePath)\ClusterState$(vPreviousState).qvd (QVD)
+	WHERE 
+		Flag='Attribute'
+	;
+	
+	OUTER JOIN(PointData)
+	LOAD
+		MeasureA as CenterA
+	,	MeasureB as CenterB
+	,	ClusterID
+	FROM $(vClustersStorePath)\ClusterState$(vPreviousState).qvd (QVD)
+	WHERE 
+		Flag='Center'
+	;
+
+	PointData_temp:
+	NoConcatenate
+	LOAD
+		MeasureA
+	,	MeasureB
+	,	Dimension
+	,	Flag
+	,	'$(i1)' as State
+	,	CenterA
+	,	CenterB
+	,	ClusterID
+	,	sqrt(pow(MeasureA-CenterA, 2)+pow(MeasureB-CenterB, 2)) as EuclidianDistance
+	Resident PointData
+	;
+	
+	LET vTempCheck1 = NoOfRows('PointData_temp');
+
+	DROP TABLE PointData;
+	
+	Inner JOIN (PointData_temp)
+	LOAD DISTINCT
+		Dimension
+	,	Min(EuclidianDistance) as EuclidianDistance
+	Resident PointData_temp
+	Group BY
+		Dimension
+	;
+	
+	DROP FIELDS CenterA,CenterB,EuclidianDistance FROM PointData_temp;
+
+	LET vTempCheck2 = NoOfRows('PointData_temp');	
+
+	Concatenate(PointData_temp)
+	LOAD 
+		Sum(MeasureA)/Count(MeasureA) as MeasureA
+	,	Sum(MeasureB)/Count(MeasureB) as MeasureB
+	,	ClusterID 	as Dimension
+	,	'Center' 	as Flag
+	,	'$(i1)' 	as State
+	,	ClusterID
+	Resident PointData_temp
+	GROUP BY
+		ClusterID
+	;
+
+	//We're storing the data built with the itterration.
+	STORE PointData_temp INTO $(vClustersStorePath)\ClusterState$(i1).qvd (qvd);
+	DROP TABLE PointData_temp;
+
+	//Check if this is the last itteration and Centroids will never change position again.
+
+	VAL:
+	NoConcatenate
+	LOAD DISTINCT
+		MeasureA
+	,	MeasureB
+	,	ClusterID
+	,	Dimension
+	FROM $(vClustersStorePath)\ClusterState$(i1).qvd (qvd)
+	WHERE 
+		Flag='Center'
+	;
+	LET vValRows = NoOfRows('VAL');
+	OUTER JOIN(VAL)
+	LOAD DISTINCT
+		MeasureA
+	,	MeasureB
+	,	ClusterID
+	,	Dimension
+	FROM $(vClustersStorePath)\ClusterState$(vPreviousState).qvd (qvd)
+	WHERE 
+		Flag='Center'
+	;
+	LET vValRowsCheck = NoOfRows('VAL');
+
+	DROP TABLE VAL;
+	
+	IF ($(vValRows) = $(vValRowsCheck)) OR ($(i1)=10) then
+		LET vValidateEndOfLoop = 1;
+	ELSE
+		LET vValidateEndOfLoop = 0;
+	ENDIF;
+	
+	LET i1=$(i1)+1;
+	
+	//===================== CREATE LOG FILE if the variable is set to 1
+	IF $(EnableLog)=1 then
+		CheckTable:
+		LOAD
+			'$(vValRows)' as vValRows
+		,	'$(vValRowsCheck)' as vValRowsCheck
+		,	'$(vValidateEndOfLoop)' as vValidateEndOfLoop
+		,	'$(i1)' as i1
+		AutoGenerate 1
+		;
+		
+		STORE CheckTable INTO $(vClustersStorePath)\Check$(i1).qvd (qvd);
+	endif
+
+LOOP;
+
+END SUB
+
+//Example use:
+Call KMeansCluster_RandomizedElements(1000, 800, 500, 4, 0, 'C:\Clusters\')
+
+//Getting all the data together with the individual states where it was generated.
+DATA: LOAD * FROM $(vClustersStorePath)\ClusterState*.qvd (qvd);
