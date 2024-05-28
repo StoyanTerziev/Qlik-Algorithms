@@ -218,7 +218,7 @@ LOOP;
 END SUB
 
 //Example use:
-Call KMeansCluster_RandomizedElements(1000, 800, 500, 4, 0, 'C:\Clusters\')
+//Call KMeansCluster_RandomizedElements(1000, 800, 500, 4, 0, 'C:\Clusters\')
 
 //Getting all the data together with the individual states where it was generated.
-DATA: LOAD * FROM $(vClustersStorePath)\ClusterState*.qvd (qvd);
+//DATA: LOAD * FROM $(vClustersStorePath)\ClusterState*.qvd (qvd);
