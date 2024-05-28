@@ -2,17 +2,19 @@
 Different stand-alone algorithms grouped in libraries
 
 
-#Clustering animation chart in QlikView
+# Clustering animation chart in QlikView
 
 Sub KMeansCluster_RandomizedElements(Elements, xAxisLen, yAxisLen, Clusters, EnableLog, StoragePath)
-/*Arguments Explained:
+
+Arguments Explained:
+
 Elements = That's the number of random elements that we will plot on the scatterPlot
 xAxisLen = Maximum random value on the x axis
 yAxisLen = Maximum random value on the y axis
 Clusters = That's the K - number of cluster groups where the elements will be assigned
 EnableLog = 1 to enable Log; 0 to disable log
 StoragePath = dedicated folder to store all the temp files to avoid bandwidth issues with the RAM during exectuion
-*/
+
 
 1. Put the code below in your QlikView app and hit Reload.
 
