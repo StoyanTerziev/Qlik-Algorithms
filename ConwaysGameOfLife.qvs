@@ -1,0 +1,94 @@
+SUB ConwaysGameOfLife(xyGrid, Itterations)
+
+/*Arguments explained:
+xyGrid - this is the height and width of the grid we will display
+Itterations - this is how many future generations we will create
+*/
+
+LET vRows = $(xyGrid);
+LET vCols = $(xyGrid);
+
+InitialState:
+LOAD
+    RecNo() AS RowID,
+    IterNo() AS ColID,
+    If(Rand() > 0.8, 1, 0) AS CellState,
+    0 as Itteration
+AUTOGENERATE $(vRows)
+WHILE IterNo() <= $(vCols);
+
+
+NextState:
+NoConcatenate
+LOAD
+    RowID,
+    ColID,
+    CellState,
+    // Calculate the number of alive neighbors
+    CellState +
+    Peek('CellState', RowID - 1 + ColID - 1 * $(vRows), 'InitialState') +
+    Peek('CellState', RowID - 1 + ColID * $(vRows), 'InitialState') +
+    Peek('CellState', RowID - 1 + ColID + 1 * $(vRows), 'InitialState') +
+    Peek('CellState', RowID + ColID - 1 * $(vRows), 'InitialState') +
+    Peek('CellState', RowID + ColID + 1 * $(vRows), 'InitialState') +
+    Peek('CellState', RowID + 1 + ColID - 1 * $(vRows), 'InitialState') +
+    Peek('CellState', RowID + 1 + ColID * $(vRows), 'InitialState') +
+    Peek('CellState', RowID + 1 + ColID + 1 * $(vRows), 'InitialState') AS Neighbors
+RESIDENT InitialState;
+
+NextGeneration:
+NoConcatenate
+LOAD
+    RowID,
+    ColID,
+    If(CellState = 1 AND (Neighbors = 2 OR Neighbors = 3), 1,
+    If(CellState = 0 AND Neighbors = 3, 1, 0)) AS CellState,
+    1 as Itteration
+RESIDENT NextState;
+
+DROP TABLE NextState;
+
+Concatenate(InitialState)
+LOAD
+    *
+RESIDENT NextGeneration;
+
+FOR i = 2 TO $(Itterations) // Number of Generations
+
+	NextState:
+	NoConcatenate
+	LOAD
+	    RowID,
+	    ColID,
+	    CellState,
+	    CellState +
+	    Peek('CellState', RowID - 1 + ColID - 1 * $(vRows), 'NextGeneration') +
+	    Peek('CellState', RowID - 1 + ColID * $(vRows), 'NextGeneration') +
+	    Peek('CellState', RowID - 1 + ColID + 1 * $(vRows), 'NextGeneration') +
+	    Peek('CellState', RowID + ColID - 1 * $(vRows), 'NextGeneration') +
+	    Peek('CellState', RowID + ColID + 1 * $(vRows), 'NextGeneration') +
+	    Peek('CellState', RowID + 1 + ColID - 1 * $(vRows), 'NextGeneration') +
+	    Peek('CellState', RowID + 1 + ColID * $(vRows), 'NextGeneration') +
+	    Peek('CellState', RowID + 1 + ColID + 1 * $(vRows), 'NextGeneration') AS Neighbors
+	RESIDENT NextGeneration;
+	
+	DROP TABLE NextGeneration;
+	
+	NextGeneration:
+	NoConcatenate
+	LOAD
+	    RowID,
+	    ColID,
+	    If(CellState = 1 AND (Neighbors = 2 OR Neighbors = 3), 1,
+	    If(CellState = 0 AND Neighbors = 3, 1, 0)) AS CellState,
+    	$(i) as Itteration
+	RESIDENT NextState;
+	
+	DROP TABLE NextState;
+	Concatenate(InitialState)
+	LOAD
+    * RESIDENT NextGeneration;
+NEXT i;
+DROP TABLE NextGeneration;
+
+END SUB
